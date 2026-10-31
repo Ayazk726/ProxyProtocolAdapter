@@ -334,7 +334,7 @@ class ProxyNatGui:
         button_row.pack(fill="x")
         self.btn_start = ttk.Button(button_row, text="启动", command=self.start_nat, width=13)
         self.btn_stop = ttk.Button(button_row, text="停止", command=self.stop_nat, width=13, state="disabled")
-        self.btn_save = ttk.Button(button_row, text="重启", command=self.save_config_and_restart, width=13)
+        self.btn_save = ttk.Button(button_row, text="重载配置", command=self.save_config_and_restart, width=13)
         self.btn_open_log = ttk.Button(button_row, text="打开日志", command=self.open_log, width=13)
         self.btn_clear_log = ttk.Button(button_row, text="清空显示", command=self.clear_log_view, width=13)
         for button in (
