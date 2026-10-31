@@ -55,7 +55,7 @@ frpc -> frps -> 客户端
 ### 方式一：直接运行 exe
 
 ```text
-dist\ProxyProtocolAdapter.exe
+ProxyProtocolAdapter.exe
 ```
 
 程序需要管理员权限，启动后会弹出 UAC 提示。
