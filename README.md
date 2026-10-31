@@ -7,7 +7,6 @@ Proxy Protocol Adapter 是一个面向 Windows 的 **适配器**，用于让不�
 当前只测试了 **frp**。其他支持 PROXY protocol v2 的反向代理软件理论上也可能适用，但需要自行验证。
 
 > [!CAUTION]
-> 此插件可能导致 GSLT 封禁，请自行承担风险。
 > WinDivert 驱动可能被部分杀毒软件、EDR 或安全软件拦截
 > 如果确认使用的是本程序自带的 WinDivert 驱动（由pydivert包提供），请在杀毒软件中放行并信任程序
 > 不要随意下载来源不明的 WinDivert 驱动。
