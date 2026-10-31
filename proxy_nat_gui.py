@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import tkinter as tk
 from tkinter import messagebox, scrolledtext, ttk
 
@@ -674,6 +675,7 @@ class ProxyNatGui:
     def quit_app(self) -> None:
         if self.proc is not None or nat_instance_running():
             self.stop_nat()
+        self._stop_windivert_driver()
         if self.tray_icon is not None:
             try:
                 self.tray_icon.stop()
@@ -681,6 +683,42 @@ class ProxyNatGui:
                 pass
             self.tray_icon = None
         self.root.destroy()
+
+    def _stop_windivert_driver(self) -> None:
+        """Stop the WinDivert kernel driver when the GUI fully exits."""
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        try:
+            query = subprocess.run(
+                ["sc.exe", "query", "WinDivert"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                creationflags=flags,
+            )
+            if "RUNNING" not in query.stdout:
+                return
+            subprocess.run(
+                ["sc.exe", "stop", "WinDivert"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                creationflags=flags,
+            )
+            for _ in range(15):
+                time.sleep(0.2)
+                query = subprocess.run(
+                    ["sc.exe", "query", "WinDivert"],
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                    creationflags=flags,
+                )
+                if "STOPPED" in query.stdout:
+                    self._append_log("[GUI] WinDivert 驱动已停止\n")
+                    return
+            self._append_log("[GUI] WinDivert 驱动停止超时，可能仍被其他程序占用\n")
+        except Exception as exc:
+            self._append_log(f"[GUI] 停止 WinDivert 驱动失败：{exc}\n")
 
 
 def main() -> int:
