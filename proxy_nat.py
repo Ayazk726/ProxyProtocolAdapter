@@ -27,6 +27,8 @@ import ctypes
 import datetime as _dt
 import json
 import os
+import shutil
+import subprocess
 import sys
 import time
 
@@ -100,6 +102,88 @@ def acquire_instance_lock() -> bool:
     with open(PID_PATH, "w", encoding="ascii") as fp:
         fp.write(str(os.getpid()))
     return True
+
+
+WINDIVERT_SERVICE = "WinDivert"
+WINDIVERT_STABLE_SYS = os.path.join(
+    os.environ.get("SystemRoot", r"C:\Windows"),
+    "System32",
+    "drivers",
+    "WinDivert64.sys",
+)
+
+
+def _sc(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["sc.exe", *args],
+        capture_output=True,
+        text=True,
+        errors="replace",
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+
+
+def _service_binary_path() -> str | None:
+    result = _sc("qc", WINDIVERT_SERVICE)
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        if "BINARY_PATH_NAME" in line:
+            path = line.split(":", 1)[1].strip()
+            if path.startswith("\\??\\"):
+                path = path[4:]
+            return path
+    return None
+
+
+def ensure_windivert_driver() -> tuple[bool, str]:
+    """Install/repair WinDivert from the bundled pydivert driver if needed."""
+    try:
+        import pydivert
+    except ImportError:
+        return False, "pydivert 未安装"
+
+    bundled_sys = os.path.join(
+        os.path.dirname(pydivert.__file__),
+        "windivert_dll",
+        "WinDivert64.sys",
+    )
+    if not os.path.exists(bundled_sys):
+        return False, f"找不到 WinDivert64.sys：{bundled_sys}（可能被杀毒软件删除）"
+
+    existing_path = _service_binary_path()
+    if existing_path and os.path.exists(existing_path):
+        return True, f"使用已安装的 WinDivert 驱动：{existing_path}"
+
+    if existing_path:
+        _sc("stop", WINDIVERT_SERVICE)
+        _sc("delete", WINDIVERT_SERVICE)
+
+    try:
+        os.makedirs(os.path.dirname(WINDIVERT_STABLE_SYS), exist_ok=True)
+        if os.path.abspath(bundled_sys) != os.path.abspath(WINDIVERT_STABLE_SYS):
+            shutil.copy2(bundled_sys, WINDIVERT_STABLE_SYS)
+    except OSError as exc:
+        return False, f"复制 WinDivert64.sys 失败：{exc}"
+
+    result = _sc(
+        "create",
+        WINDIVERT_SERVICE,
+        "type=",
+        "kernel",
+        "start=",
+        "demand",
+        "error=",
+        "normal",
+        "binPath=",
+        "\\??\\" + WINDIVERT_STABLE_SYS,
+        "DisplayName=",
+        "WinDivert",
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        return False, f"创建 WinDivert 驱动服务失败：{detail}"
+    return True, f"已安装 WinDivert 驱动：{WINDIVERT_STABLE_SYS}"
 
 
 def _normalize_rule(raw: dict, index: int) -> dict:
@@ -265,6 +349,10 @@ class ProxyNat:
             self.log("no enabled NAT rules; exiting")
             return
         self.log(f"WinDivert NAT filter: {self.filter}")
+        driver_ok, driver_message = ensure_windivert_driver()
+        self.log(driver_message)
+        if not driver_ok:
+            return
         try:
             with pydivert.WinDivert(self.filter) as wd:
                 self.log("WinDivert opened; waiting for packets")
@@ -282,6 +370,9 @@ class ProxyNat:
                     if time.monotonic() - last_cleanup > 5:
                         last_cleanup = time.monotonic()
                         self._cleanup()
+        except FileNotFoundError as exc:
+            self.log(f"WinDivert 驱动加载失败：{exc}")
+            self.log("请检查杀毒软件是否拦截或删除了 WinDivert64.sys")
         except KeyboardInterrupt:
             self.log("stopped")
 
