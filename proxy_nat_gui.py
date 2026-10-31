@@ -8,12 +8,12 @@ system tray; the tray menu has "关闭 GUI" and "彻底退出".
 from __future__ import annotations
 
 import argparse
+import atexit
 import ctypes
 import json
 import os
 import subprocess
 import sys
-import time
 import tkinter as tk
 from tkinter import messagebox, scrolledtext, ttk
 
@@ -28,6 +28,7 @@ CONFIG_DIR = os.path.join(BASE_DIR, "config")
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "proxy_nat.json")
 PID_PATH = os.path.join(LOG_DIR, "proxy_nat.pid")
+GUI_PID_PATH = os.path.join(LOG_DIR, "proxy_nat_gui.pid")
 NAT_SCRIPT = os.path.join(BASE_DIR, "proxy_nat.py")
 NAT_COMMAND = [sys.executable, "--run-nat"] if FROZEN else [sys.executable, NAT_SCRIPT]
 FONT = ("Microsoft YaHei UI", 9)
@@ -76,6 +77,38 @@ def nat_instance_running() -> bool:
         return pid > 0 and _pid_running(pid)
     except (OSError, ValueError):
         return False
+
+
+def gui_instance_running() -> bool:
+    try:
+        if not os.path.exists(GUI_PID_PATH):
+            return False
+        with open(GUI_PID_PATH, "r", encoding="ascii") as fp:
+            pid = int(fp.read().strip() or "0")
+        return pid > 0 and _pid_running(pid)
+    except (OSError, ValueError):
+        return False
+
+
+def acquire_gui_lock() -> bool:
+    os.makedirs(LOG_DIR, exist_ok=True)
+    if gui_instance_running():
+        return False
+    with open(GUI_PID_PATH, "w", encoding="ascii") as fp:
+        fp.write(str(os.getpid()))
+    return True
+
+
+def release_gui_lock() -> None:
+    try:
+        if not os.path.exists(GUI_PID_PATH):
+            return
+        with open(GUI_PID_PATH, "r", encoding="ascii") as fp:
+            pid = fp.read().strip()
+        if pid == str(os.getpid()):
+            os.remove(GUI_PID_PATH)
+    except OSError:
+        pass
 
 
 def relaunch_as_admin() -> None:
@@ -202,8 +235,11 @@ class ProxyNatGui:
         self.config = load_config()
         self.rules = [dict(rule) for rule in self.config.get("rules", [])]
         self.proc: subprocess.Popen | None = None
-        self.log_offset = 0
         self.log_path = resolve_log_path(self.config)
+        try:
+            self.log_offset = os.path.getsize(self.log_path) if os.path.exists(self.log_path) else 0
+        except OSError:
+            self.log_offset = 0
         self.stderr_path = os.path.join(LOG_DIR, "proxy_nat_stderr.log")
         self.stderr_file = None
         self.was_external = False
@@ -423,7 +459,13 @@ class ProxyNatGui:
             return False
         self.config = config
         self.rules = [dict(rule) for rule in config["rules"]]
-        self.log_path = resolve_log_path(config)
+        new_log_path = resolve_log_path(config)
+        if new_log_path != self.log_path:
+            self.log_path = new_log_path
+            try:
+                self.log_offset = os.path.getsize(self.log_path) if os.path.exists(self.log_path) else 0
+            except OSError:
+                self.log_offset = 0
         if show_message:
             self._append_log("[GUI] 配置已保存\n")
         if restart and was_running:
@@ -446,7 +488,13 @@ class ProxyNatGui:
         self.rules = [dict(rule) for rule in self.config["rules"]]
         self._load_globals()
         self._refresh_rule_tree()
-        self.log_path = resolve_log_path(self.config)
+        new_log_path = resolve_log_path(self.config)
+        if new_log_path != self.log_path:
+            self.log_path = new_log_path
+            try:
+                self.log_offset = os.path.getsize(self.log_path) if os.path.exists(self.log_path) else 0
+            except OSError:
+                self.log_offset = 0
         self._append_log("[GUI] 配置已重新读取\n")
 
     # ---------------------------------------------------------------- NAT
@@ -465,7 +513,7 @@ class ProxyNatGui:
         try:
             self.stderr_file = open(self.stderr_path, "a", encoding="utf-8")
             self.proc = subprocess.Popen(
-                [*NAT_COMMAND, "--keep-driver", "--config", CONFIG_PATH],
+                [*NAT_COMMAND, "--config", CONFIG_PATH],
                 cwd=BASE_DIR,
                 stdout=subprocess.DEVNULL,
                 stderr=self.stderr_file,
@@ -675,50 +723,14 @@ class ProxyNatGui:
     def quit_app(self) -> None:
         if self.proc is not None or nat_instance_running():
             self.stop_nat()
-        self._stop_windivert_driver()
         if self.tray_icon is not None:
             try:
                 self.tray_icon.stop()
             except Exception:
                 pass
             self.tray_icon = None
+        release_gui_lock()
         self.root.destroy()
-
-    def _stop_windivert_driver(self) -> None:
-        """Stop the WinDivert kernel driver when the GUI fully exits."""
-        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        try:
-            query = subprocess.run(
-                ["sc.exe", "query", "WinDivert"],
-                capture_output=True,
-                text=True,
-                timeout=2,
-                creationflags=flags,
-            )
-            if "RUNNING" not in query.stdout:
-                return
-            subprocess.run(
-                ["sc.exe", "stop", "WinDivert"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                creationflags=flags,
-            )
-            for _ in range(15):
-                time.sleep(0.2)
-                query = subprocess.run(
-                    ["sc.exe", "query", "WinDivert"],
-                    capture_output=True,
-                    text=True,
-                    timeout=2,
-                    creationflags=flags,
-                )
-                if "STOPPED" in query.stdout:
-                    self._append_log("[GUI] WinDivert 驱动已停止\n")
-                    return
-            self._append_log("[GUI] WinDivert 驱动停止超时，可能仍被其他程序占用\n")
-        except Exception as exc:
-            self._append_log(f"[GUI] 停止 WinDivert 驱动失败：{exc}\n")
 
 
 def main() -> int:
@@ -736,6 +748,17 @@ def main() -> int:
         except SystemExit:
             return 1
         return 0
+
+    ensure_layout()
+    if not acquire_gui_lock():
+        ctypes.windll.user32.MessageBoxW(
+            0,
+            "Proxy Protocol Adapter 已经在运行。",
+            "Proxy Protocol Adapter",
+            0x40,
+        )
+        return 1
+    atexit.register(release_gui_lock)
 
     root = tk.Tk()
     ProxyNatGui(root)

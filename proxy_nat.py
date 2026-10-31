@@ -186,23 +186,6 @@ def ensure_windivert_driver() -> tuple[bool, str]:
     return True, f"已安装 WinDivert 驱动：{WINDIVERT_STABLE_SYS}"
 
 
-def stop_windivert_driver() -> tuple[bool, str]:
-    """Stop the WinDivert kernel driver when the standalone process exits."""
-    try:
-        query = _sc("query", WINDIVERT_SERVICE)
-        if "RUNNING" not in query.stdout:
-            return True, "WinDivert 驱动未运行"
-        _sc("stop", WINDIVERT_SERVICE)
-        for _ in range(15):
-            time.sleep(0.2)
-            query = _sc("query", WINDIVERT_SERVICE)
-            if "STOPPED" in query.stdout:
-                return True, "WinDivert 驱动已停止"
-        return False, "WinDivert 驱动停止超时"
-    except Exception as exc:
-        return False, f"停止 WinDivert 驱动失败：{exc}"
-
-
 def _normalize_rule(raw: dict, index: int) -> dict:
     try:
         target_port = int(raw.get("target_port", 0))
@@ -397,11 +380,6 @@ class ProxyNat:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default=CONFIG_PATH)
-    parser.add_argument(
-        "--keep-driver",
-        action="store_true",
-        help="do not stop the WinDivert driver when this process exits",
-    )
     args = parser.parse_args()
 
     try:
@@ -419,12 +397,7 @@ def main() -> int:
         log_path = os.path.join(APP_DIR, log_path)
 
     relay = ProxyNat(config["rules"], log_path, config["timeout"])
-    try:
-        relay.run()
-    finally:
-        if not args.keep_driver:
-            stopped, message = stop_windivert_driver()
-            relay.log(message)
+    relay.run()
     return 0
 
 

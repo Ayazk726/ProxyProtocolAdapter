@@ -80,12 +80,6 @@ python proxy_nat_gui.py
 python proxy_nat.py
 ```
 
-CLI 默认在进程退出时停止 WinDivert 驱动；如果希望进程退出后保留驱动：
-
-```powershell
-python proxy_nat.py --keep-driver
-```
-
 ## 目录结构
 
 程序启动时会在 exe 同目录创建：
@@ -190,11 +184,9 @@ GUI 提供：
 - 日志实时显示；
 - 关闭窗口最小化到托盘；
 - 托盘右键菜单：关闭 GUI、彻底退出；
-- “彻底退出”会停止 NAT 并停止 WinDivert 驱动服务。
+- 同一时间只允许运行一个 GUI 和一个 NAT 实例。
 
-注意：如果系统中还有其他程序正在使用 WinDivert 驱动，彻底退出时停止驱动可能会影响那些程序。驱动本身仍保持安装状态，下次启动程序会自动重新加载。
-
-窗口关闭不会停止 NAT，NAT 会继续在托盘运行。
+窗口关闭不会停止 NAT，NAT 会继续在托盘运行。WinDivert 驱动不会在退出时停止。
 
 ## 构建 exe
 
