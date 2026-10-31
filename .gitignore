@@ -1,0 +1,23 @@
+# Build outputs
+build/
+dist/
+
+# Python cache / virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Runtime state and logs
+logs/
+*.log
+*.pid
+
+# Test-only build specs
+TCPProbe*.spec
+
+# IDE / OS metadata
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

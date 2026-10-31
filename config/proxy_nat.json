@@ -1,0 +1,14 @@
+{
+  "log": "logs/proxy_nat.log",
+  "timeout": 300.0,
+  "rules": [
+    {
+      "name": "NAT 1",
+      "enabled": true,
+      "target_host": "127.0.0.1",
+      "target_port": 27021,
+      "reverse_proxy_source": "127.0.0.1",
+      "reply_source": "127.0.0.1"
+    }
+  ]
+}
