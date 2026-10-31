@@ -233,6 +233,7 @@ class ProxyNatGui:
 
         ensure_layout()
         self.config = load_config()
+        self.config_mtime = self._config_file_mtime()
         self.rules = [dict(rule) for rule in self.config.get("rules", [])]
         self.proc: subprocess.Popen | None = None
         self.log_path = resolve_log_path(self.config)
@@ -334,14 +335,12 @@ class ProxyNatGui:
         self.btn_start = ttk.Button(button_row, text="启动", command=self.start_nat, width=13)
         self.btn_stop = ttk.Button(button_row, text="停止", command=self.stop_nat, width=13, state="disabled")
         self.btn_save = ttk.Button(button_row, text="重启", command=self.save_config_and_restart, width=13)
-        self.btn_reload = ttk.Button(button_row, text="重载配置", command=self.reload_config, width=13)
         self.btn_open_log = ttk.Button(button_row, text="打开日志", command=self.open_log, width=13)
         self.btn_clear_log = ttk.Button(button_row, text="清空显示", command=self.clear_log_view, width=13)
         for button in (
             self.btn_start,
             self.btn_stop,
             self.btn_save,
-            self.btn_reload,
             self.btn_open_log,
             self.btn_clear_log,
         ):
@@ -443,6 +442,12 @@ class ProxyNatGui:
         }
         return proxy_nat.normalize_config(raw)
 
+    def _config_file_mtime(self) -> float:
+        try:
+            return os.path.getmtime(CONFIG_PATH)
+        except OSError:
+            return 0.0
+
     def save_config(self, show_message: bool = True, restart: bool = False) -> bool:
         try:
             config = self._build_config()
@@ -459,6 +464,7 @@ class ProxyNatGui:
             return False
         self.config = config
         self.rules = [dict(rule) for rule in config["rules"]]
+        self.config_mtime = self._config_file_mtime()
         new_log_path = resolve_log_path(config)
         if new_log_path != self.log_path:
             self.log_path = new_log_path
@@ -474,28 +480,31 @@ class ProxyNatGui:
         return True
 
     def save_config_and_restart(self) -> None:
-        self.save_config(show_message=True, restart=True)
-
-    def reload_config(self) -> None:
-        if self.proc is not None and self.proc.poll() is None:
-            messagebox.showinfo("提示", "请先停止 NAT 再重新读取配置。", parent=self.root)
-            return
-        try:
-            self.config = proxy_nat.load_config(CONFIG_PATH)
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            messagebox.showerror("读取失败", str(exc), parent=self.root)
-            return
-        self.rules = [dict(rule) for rule in self.config["rules"]]
-        self._load_globals()
-        self._refresh_rule_tree()
-        new_log_path = resolve_log_path(self.config)
-        if new_log_path != self.log_path:
-            self.log_path = new_log_path
+        # If the config file was edited externally, reload it instead of
+        # overwriting it with the current GUI state.
+        if self._config_file_mtime() > self.config_mtime + 0.0001:
             try:
-                self.log_offset = os.path.getsize(self.log_path) if os.path.exists(self.log_path) else 0
-            except OSError:
-                self.log_offset = 0
-        self._append_log("[GUI] 配置已重新读取\n")
+                config = proxy_nat.load_config(CONFIG_PATH)
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                messagebox.showerror("重载失败", str(exc), parent=self.root)
+                return
+            self.config = config
+            self.rules = [dict(rule) for rule in config["rules"]]
+            self.config_mtime = self._config_file_mtime()
+            self._load_globals()
+            self._refresh_rule_tree()
+            new_log_path = resolve_log_path(config)
+            if new_log_path != self.log_path:
+                self.log_path = new_log_path
+                try:
+                    self.log_offset = os.path.getsize(self.log_path) if os.path.exists(self.log_path) else 0
+                except OSError:
+                    self.log_offset = 0
+            self._append_log("[GUI] 检测到配置文件修改，已重载配置\n")
+            if (self.proc is not None and self.proc.poll() is None) or nat_instance_running():
+                self._restart_nat()
+            return
+        self.save_config(show_message=True, restart=True)
 
     # ---------------------------------------------------------------- NAT
     def start_nat(self) -> None:
