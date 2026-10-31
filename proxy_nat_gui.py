@@ -465,7 +465,7 @@ class ProxyNatGui:
         try:
             self.stderr_file = open(self.stderr_path, "a", encoding="utf-8")
             self.proc = subprocess.Popen(
-                [*NAT_COMMAND, "--config", CONFIG_PATH],
+                [*NAT_COMMAND, "--keep-driver", "--config", CONFIG_PATH],
                 cwd=BASE_DIR,
                 stdout=subprocess.DEVNULL,
                 stderr=self.stderr_file,

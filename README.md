@@ -80,6 +80,12 @@ python proxy_nat_gui.py
 python proxy_nat.py
 ```
 
+CLI 默认在进程退出时停止 WinDivert 驱动；如果希望进程退出后保留驱动：
+
+```powershell
+python proxy_nat.py --keep-driver
+```
+
 ## 目录结构
 
 程序启动时会在 exe 同目录创建：
